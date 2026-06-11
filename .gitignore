@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+.env.local
+.env.production
+
+# System
+.DS_Store
+Thumbs.db
+*.log
+
+# Sub-repositories
+xeno-channel-service/
+

@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: xeno-crm-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: CHANNEL_SERVICE_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
