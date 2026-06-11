@@ -1,127 +1,94 @@
-# Xeno CRM - AI-Native Shopper Engagement Platform
+# Xeno CRM — AI-Native Shopper Engagement Platform
 
-Welcome to **Xeno CRM**, an AI-native shopper engagement mini-CRM tailored for **Elara**, a D2C premium beauty and wellness brand. This monorepo contains a FastAPI backend service and a Next.js 14 frontend application designed to segment customers, create tailored marketing campaigns, and use AI features to generate optimized copy and suggest segment rules.
+> Built for Xeno Engineering Internship Assignment 2026
 
----
+## Live Demo
+- **App:** https://xeno-crm-[hash].vercel.app
+- **Demo login:** demo@xenocrm.com / elara2026
+- **API Docs:** https://xeno-crm-backend.onrender.com/docs
 
-## Repository Structure
+## Product Overview
+An AI-native mini CRM for D2C brands to identify high-value shopper
+segments, generate personalized campaign copy, launch campaigns through
+a simulated channel service, and track real-time delivery performance.
 
+Demo brand: **Elara** — a premium beauty and wellness brand.
+
+## Architecture
+Two-service architecture per assignment requirements:
 ```
-xeno-crm/
-├── backend/
-│   ├── app/
-│   │   ├── main.py             # FastAPI entrypoint, router registrations, CORS, lifespan
-│   │   ├── database.py         # SQLAlchemy 2.0 Async engine, session, and dependency
-│   │   ├── config.py           # Pydantic Settings env loader
-│   │   ├── models/             # SQLAlchemy 2.0 mapped_column models
-│   │   ├── schemas/            # Pydantic schemas mirroring models
-│   │   ├── routers/            # FastAPI router endpoints (customers, segments, campaigns, receipts, ai)
-│   │   ├── services/           # Segmentation, campaign sending, and analytics services
-│   │   └── ai/                 # LLM handlers (segment suggestions, copywriting)
-│   ├── seed/
-│   │   └── seed.py             # Idempotent Indian-locale (Faker('en_IN')) data generator
-│   ├── alembic/                # Async database migration configuration
-│   ├── requirements.txt        # Backend dependencies
-│   ├── .env.example            # Environment variables template
-│   └── Dockerfile              # Container configuration
-├── frontend/
-│   ├── app/                    # Next.js 14 App Router (layout, dashboard, segments, campaigns)
-│   ├── components/             # Reusable UI elements (using Shadcn UI tokens)
-│   ├── lib/
-│   │   └── api.ts              # Typed fetch client stubs
-│   ├── package.json            # React/Next dependencies
-│   └── tailwind.config.ts      # Styling configurations
-├── docker-compose.yml          # Root-level PostgreSQL service orchestration
-└── README.md                   # Setup and operations guide
+[Next.js Frontend]
+        ↓ REST + SSE
+[FastAPI CRM Backend] ──POST /send──→ [Channel Service]
+        ↑ POST /receipts ←── async callbacks ──┘
+        ↓
+[PostgreSQL on Neon]
+        ↓
+[Gemini 2.0 Flash API]
 ```
 
----
+## AI Features
+- **Segment suggest:** Natural language → audience rules (streaming)
+- **Message draft:** Personalized campaign copy per channel (streaming)
+- **Channel recommendation:** Based on segment preferences
 
-## Brand Context: Elara
+## Tech Stack
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js 14, Tailwind CSS, shadcn/ui, Recharts |
+| Backend | FastAPI, SQLAlchemy 2.0, asyncpg |
+| Database | PostgreSQL (Neon serverless) |
+| AI | Google Gemini 2.0 Flash |
+| Channel Service | FastAPI, asyncio background tasks |
+| Deployment | Vercel + Render |
 
-**Elara** is a premium D2C beauty and wellness brand focusing on high-quality organic skincare, premium coffee blends, and holistic lifestyle wellness. 
+## Key Design Decisions & Tradeoffs
+- Used PostgreSQL over event streaming (Kafka) — right scale for MVP,
+  would add Kafka at 100k+ events/day
+- SSE streaming over WebSockets — simpler, sufficient for unidirectional AI output
+- Probabilistic simulation over real provider — assignment spec requires stubbed service
+- localStorage demo auth over JWT — scope decision, production would use
+  httpOnly cookies with refresh token rotation
+- Gemini 2.0 Flash over GPT-4 — faster streaming, generous free tier,
+  sufficient quality for CRM copy generation
 
-To model real-world engagement patterns, our data seed populates:
-- **High-Value Lapsed (200)**: Big spenders (₹8,000–₹25,000) who haven't ordered in 50–120 days. High priority for AI-drafted email Win-Back campaigns.
-- **Frequent Recent (200)**: Highly active loyalists (₹2,000–₹8,000) purchasing in the last 1–20 days. Best for new product launch notifications via WhatsApp.
-- **New One-Time (200)**: Fresh trial signups (₹300–₹1,200) who ordered in the last 5–40 days. Target for SMS-based feedback surveys.
-- **Mid-Value Dormant (200)**: Occasional shoppers (₹2,000–₹6,000) inactive for 90–200 days. Great for personalized discount coupon codes.
-
----
-
-## Backend Setup
-
-### Prerequisites
-- Python 3.12 (or 3.11)
-- Pip (Python Package Manager)
-
-### Installation
-1. Go to the `backend/` directory:
-   ```bash
-   cd backend
-   ```
-2. Create and activate a virtual environment:
-   ```bash
-   # On Windows (PowerShell)
-   python -m venv .venv
-   .venv\Scripts\Activate.ps1
-
-   # On Linux/macOS
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Create your local configuration by copying `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-
-### Database & Seeding
-1. Launch the local PostgreSQL container using Docker:
-   ```bash
-   docker-compose up -d
-   ```
-2. Run migrations (or let FastAPI auto-create tables on first launch).
-3. Populate the database with the idempotent seed script:
-   ```bash
-   python seed/seed.py
-   ```
-
-### Running the API
-Start the FastAPI server:
+## Local Setup
 ```bash
-uvicorn app.main:app --reload
-```
-The interactive Swagger API documentation will be available at `http://localhost:8000/docs`.
+# 1. Clone repos
+git clone https://github.com/YOUR_USERNAME/xeno-crm
+git clone https://github.com/YOUR_USERNAME/xeno-channel-service
 
----
+# 2. Backend setup
+cd xeno-crm/backend
+pip install -r requirements.txt
+cp .env.example .env  # Fill in your values
+python seed/seed.py
+uvicorn app.main:app --reload --port 8000
 
-## Frontend Setup
+# 3. Channel service setup
+cd ../../xeno-channel-service
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload --port 8001
 
-### Prerequisites
-- Node.js (v18+)
-- Npm or Yarn
-
-### Installation
-1. Navigate to the `frontend/` directory:
-   ```bash
-   cd frontend
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Create your `.env.local` configuration from `.env.local.example`:
-   ```bash
-   cp .env.local.example .env.local
-   ```
-
-### Running Next.js
-Launch the local dev server:
-```bash
+# 4. Frontend setup
+cd ../xeno-crm/frontend
+npm install
+cp .env.local.example .env.local  # Fill in API URL
 npm run dev
 ```
-Open `http://localhost:3000` in your browser. The landing page redirects automatically to `/dashboard`.
+
+### Seed Data
+800 customers across 4 behavioral profiles, 3000 orders,
+7 Indian cities, brand: Elara beauty & wellness.
+
+### Walkthrough Video
+[Link to video]
+
+### Scale-up Plan
+At production scale this system would add:
+- Kafka for high-volume event ingestion
+- Redis + Celery for distributed task queue
+- Idempotency middleware with stronger retry policies
+- Role-based access control and audit logs
+- Warehouse sync for attribution modeling
