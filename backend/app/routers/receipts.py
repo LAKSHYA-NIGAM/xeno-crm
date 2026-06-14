@@ -112,7 +112,7 @@ async def receive_receipt(
     # Only upgrade status, never downgrade
     if new_order > current_order:
         recipient.current_status = payload.event_type
-        print(f"[RECEIPT] Status updated: {payload.campaign_recipient_id} → {payload.event_type}")
+        print(f"[RECEIPT] Status updated: {payload.campaign_recipient_id} -> {payload.event_type}")
 
     try:
         await db.commit()
