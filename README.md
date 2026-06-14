@@ -3,9 +3,9 @@
 > Built for Xeno Engineering Internship Assignment 2026
 
 ## Live Demo
-- **App:** https://xeno-crm-[hash].vercel.app
+- **App:** https://frontend-chi-snowy-71.vercel.app
 - **Demo login:** demo@xenocrm.com / elara2026
-- **API Docs:** https://xeno-crm-backend.onrender.com/docs
+- **API Docs:** https://xeno-crm-ry0s.onrender.com/docs
 
 ## Product Overview
 An AI-native mini CRM for D2C brands to identify high-value shopper
