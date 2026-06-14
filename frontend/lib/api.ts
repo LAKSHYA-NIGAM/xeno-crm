@@ -225,14 +225,18 @@ export const api = {
   },
 
   sendCampaign: async (id: string) => {
-    try {
-      const res = await fetch(`${BASE}/campaigns/${id}/send`, { method: "POST" })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return await res.json()
-    } catch (e) {
-      console.error("sendCampaign failed:", e)
-      throw e
+    const res = await fetch(
+      `${BASE}/campaigns/${id}/send`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }
+    )
+    if (!res.ok) {
+      const err = await res.json()
+      throw new Error(err.detail || "Send failed")
     }
+    return res.json()
   },
 
   getCampaignFunnel: async (id: string) => {

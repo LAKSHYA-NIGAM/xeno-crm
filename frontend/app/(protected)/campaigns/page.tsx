@@ -70,6 +70,7 @@ function CampaignsContent() {
 
   // Step 4: Launch states
   const [launching, setLaunching] = useState(false);
+  const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
 
   // Campaign Detail Modal states
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
@@ -277,44 +278,66 @@ function CampaignsContent() {
       toast.error("Campaign name is required");
       return;
     }
+    if (!selectedSegment) {
+      toast.error("No segment selected");
+      return;
+    }
+
     setLaunching(true);
     try {
-      let segmentId = selectedSegmentId;
+      console.log("[LAUNCH] Creating campaign...");
+      console.log("Step 1: Creating campaign with segment:", selectedSegment?.id);
 
-      // If the selected segment is a temporary AI suggested segment, save it first
-      if (selectedSegment && selectedSegment.id.startsWith("ai_temp_")) {
-        const savedSegment = await api.createSegment({
-          name: selectedSegment.name,
-          description: selectedSegment.description || "AI Suggested Segment",
-          rule_json: selectedSegment.rule_json
+      let campaignId = createdCampaignId;
+      let campaign = null;
+
+      if (!campaignId) {
+        let segmentId = selectedSegment.id;
+
+        // If the selected segment is a temporary AI suggested segment, save it first
+        if (selectedSegment && selectedSegment.id.startsWith("ai_temp_")) {
+          const savedSegment = await api.createSegment({
+            name: selectedSegment.name,
+            description: selectedSegment.description || "AI Suggested Segment",
+            rule_json: selectedSegment.rule_json
+          });
+          segmentId = savedSegment.id;
+          setSelectedSegmentId(segmentId);
+          setSelectedSegment(savedSegment);
+        }
+
+        campaign = await api.createCampaign({
+          name: campaignName,
+          objective: objective,
+          segment_id: segmentId,
+          channel: selectedChannel,
+          message_template: editableMessage
         });
-        segmentId = savedSegment.id;
-        setSelectedSegmentId(segmentId);
-        setSelectedSegment(savedSegment);
+
+        console.log("Step 2: Campaign created with id:", campaign?.id);
+        campaignId = campaign.id;
+        setCreatedCampaignId(campaignId);
+      } else {
+        console.log("Step 2: Campaign already created with id:", campaignId);
       }
 
-      // Create campaign
-      const campaign = await api.createCampaign({
-        name: campaignName,
-        objective: objective,
-        segment_id: segmentId,
-        channel: selectedChannel,
-        message_template: editableMessage
-      });
+      console.log("Step 3: Calling send for campaign:", campaignId);
 
       // Dispatch campaign broadcast trigger
-      await api.sendCampaign(campaign.id);
+      const sendData = await api.sendCampaign(campaignId);
+      console.log("Step 4: Send response:", sendData);
 
-      toast.success("🚀 Campaign launched! Callbacks arriving shortly...");
+      toast.success(`🚀 Campaign launched to ${sendData.recipients_count} customers!`);
       
       // Delay navigation
       setTimeout(() => {
-        router.push(`/campaigns/${campaign.id}`);
+        router.push(`/campaigns/${campaignId}`);
       }, 1500);
 
-    } catch (err) {
-      console.error(err);
-      toast.error("Launch campaign failure");
+    } catch (e: any) {
+      console.error("[LAUNCH ERROR]", e);
+      toast.error(e.message || "Launch failed — check console");
+    } finally {
       setLaunching(false);
     }
   };
@@ -370,6 +393,7 @@ function CampaignsContent() {
     setEditableMessage("");
     setSelectedChannel("whatsapp");
     setCampaignName("");
+    setCreatedCampaignId(null);
     // Close route params
     router.push("/campaigns");
   };
