@@ -236,19 +236,21 @@ async def send_campaign(campaign_id: uuid.UUID, db: AsyncSession = Depends(get_d
 
     # Create campaign_recipient rows
     messages = []
+    campaign_recipients = []
     for customer in customers:
         personalized_msg = campaign.message_template.replace(
             "{first_name}", customer.first_name
         )
 
+        cr_id = uuid.uuid4()
         cr = CampaignRecipient(
+            id=cr_id,
             campaign_id=campaign.id,
             customer_id=customer.id,
             personalization_json={"first_name": customer.first_name},
             current_status="pending",
         )
-        db.add(cr)
-        await db.flush()  # get cr.id
+        campaign_recipients.append(cr)
 
         # Determine destination based on channel
         if campaign.channel == "email":
@@ -260,8 +262,11 @@ async def send_campaign(campaign_id: uuid.UUID, db: AsyncSession = Depends(get_d
             "recipient_id": str(customer.id),
             "destination": destination,
             "message": personalized_msg,
-            "metadata": {"campaign_recipient_id": str(cr.id)},
+            "metadata": {"campaign_recipient_id": str(cr_id)},
         })
+
+    if campaign_recipients:
+        db.add_all(campaign_recipients)
 
     # Explicitly commit database transaction before making the external HTTP network request
     # to avoid holding database connections open during long-running network operations.

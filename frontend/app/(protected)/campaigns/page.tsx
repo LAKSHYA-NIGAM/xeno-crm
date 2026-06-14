@@ -279,11 +279,25 @@ function CampaignsContent() {
     }
     setLaunching(true);
     try {
+      let segmentId = selectedSegmentId;
+
+      // If the selected segment is a temporary AI suggested segment, save it first
+      if (selectedSegment && selectedSegment.id.startsWith("ai_temp_")) {
+        const savedSegment = await api.createSegment({
+          name: selectedSegment.name,
+          description: selectedSegment.description || "AI Suggested Segment",
+          rule_json: selectedSegment.rule_json
+        });
+        segmentId = savedSegment.id;
+        setSelectedSegmentId(segmentId);
+        setSelectedSegment(savedSegment);
+      }
+
       // Create campaign
       const campaign = await api.createCampaign({
         name: campaignName,
         objective: objective,
-        segment_id: selectedSegmentId,
+        segment_id: segmentId,
         channel: selectedChannel,
         message_template: editableMessage
       });
