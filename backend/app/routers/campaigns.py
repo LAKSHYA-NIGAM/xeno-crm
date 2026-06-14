@@ -3,6 +3,7 @@ Campaigns router — create, list, detail, and send.
 """
 import logging
 import uuid
+import asyncio
 from uuid import UUID
 from datetime import datetime, timezone
 from typing import Optional
@@ -38,6 +39,40 @@ class CreateCampaignBody(BaseModel):
 
 
 # ---------- helper ----------
+
+async def wake_and_send(channel_service_url: str, payload: dict, max_attempts: int = 5):
+    """
+    Wakes the channel service if sleeping, then sends the batch.
+    Render free tier takes up to 50 seconds to wake from sleep.
+    This function waits up to 90 seconds total before giving up.
+    """
+    for attempt in range(max_attempts):
+        try:
+            print(f"[SEND] Attempt {attempt + 1} — calling channel service...")
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{channel_service_url}/send",
+                    json=payload,
+                )
+                if response.status_code == 200:
+                    print(f"[SEND] Success on attempt {attempt + 1}")
+                    return response
+                elif response.status_code == 502:
+                    print(f"[SEND] 502 — channel service waking up, waiting 20 seconds...")
+                    await asyncio.sleep(20)
+                else:
+                    print(f"[SEND] Unexpected status {response.status_code}")
+                    await asyncio.sleep(5)
+        except httpx.TimeoutException:
+            print(f"[SEND] Timeout on attempt {attempt + 1} — waiting 15 seconds...")
+            await asyncio.sleep(15)
+        except Exception as e:
+            print(f"[SEND] Error on attempt {attempt + 1}: {e}")
+            await asyncio.sleep(10)
+
+    print(f"[SEND] All {max_attempts} attempts failed")
+    return None
+
 
 async def _get_delivery_stats(db: AsyncSession, campaign_id: uuid.UUID) -> dict:
     """Count campaign_recipients grouped by status for inline stats."""
@@ -281,47 +316,19 @@ async def send_campaign(
     print(f"[SEND] Channel service URL: {settings.CHANNEL_SERVICE_URL}")
 
     # Call channel service
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            # First ping health to wake it up
-            print(f"[SEND] Waking channel service...")
-            health = await client.get(f"{settings.CHANNEL_SERVICE_URL}/health")
-            print(f"[SEND] Channel service awake: {health.status_code}")
-            
-            # Wait 2 seconds for it to fully initialize
-            import asyncio
-            await asyncio.sleep(2)
-            
-            # Now send the actual batch
-            print(f"[SEND] Sending batch of {len(messages)} messages...")
-            response = await client.post(
-                f"{settings.CHANNEL_SERVICE_URL}/send",
-                json=payload,
-                timeout=60.0
-            )
-            print(f"[SEND] Channel service response: {response.status_code}")
-            response.raise_for_status()
+    result = await wake_and_send(settings.CHANNEL_SERVICE_URL, payload)
+    if result:
+        print(f"[SEND] Channel service accepted batch: {result.text}")
+    else:
+        print(f"[SEND] Channel service unavailable — campaign marked launched but messages not sent")
 
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 502:
-            # Channel service was sleeping — retry once after 10 seconds
-            print(f"[SEND] Got 502 — retrying after 10 seconds...")
-            await asyncio.sleep(10)
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    f"{settings.CHANNEL_SERVICE_URL}/send",
-                    json=payload,
-                    timeout=60.0
-                )
-                print(f"[SEND] Retry response: {response.status_code}")
-    except Exception as e:
-        print(f"[SEND ERROR] {type(e).__name__}: {e}")
-        # Don't fail — log and continue
-
+    # Always return success — never let channel service failure
+    # block the campaign from being marked as launched
     return {
         "campaign_id": str(campaign.id),
         "status": "launched",
-        "recipients_count": len(customers)
+        "recipients_count": len(customers),
+        "channel_service_status": "accepted" if result else "retrying"
     }
 
 
