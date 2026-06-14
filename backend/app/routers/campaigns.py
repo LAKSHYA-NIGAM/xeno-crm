@@ -3,11 +3,12 @@ Campaigns router — create, list, detail, and send.
 """
 import logging
 import uuid
-from datetime import datetime
+from uuid import UUID
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -202,95 +203,106 @@ async def get_campaign(campaign_id: uuid.UUID, db: AsyncSession = Depends(get_db
 
 
 @router.post("/{campaign_id}/send")
-async def send_campaign(campaign_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    """
-    Launch a campaign:
-    1. Mark campaign as launched
-    2. Resolve segment customers
-    3. Create campaign_recipient rows
-    4. POST to channel service
-    """
-    # Fetch campaign
-    result = await db.execute(
-        select(Campaign)
-        .options(selectinload(Campaign.segment))
-        .where(Campaign.id == campaign_id)
-    )
-    campaign = result.scalars().first()
+async def send_campaign(
+    campaign_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    # Get campaign
+    campaign = await db.get(Campaign, UUID(campaign_id))
     if not campaign:
-        raise HTTPException(status_code=404, detail=f"Campaign {campaign_id} not found")
+        raise HTTPException(status_code=404, detail="Campaign not found")
 
-    if campaign.status != "draft":
+    # Get segment and run rules
+    segment = await db.get(Segment, campaign.segment_id)
+    if not segment:
+        raise HTTPException(status_code=404, detail="Segment not found")
+
+    # Get matching customers using segment rules
+    from app.services.segmentation import build_segment_query
+    query = build_segment_query(segment.rule_json)
+    result = await db.execute(query)
+    customers = result.scalars().all()
+
+    print(f"[SEND] Campaign {campaign_id} — found {len(customers)} customers")
+
+    if len(customers) == 0:
         raise HTTPException(
             status_code=400,
-            detail=f"Campaign is already '{campaign.status}'. Only draft campaigns can be sent.",
+            detail=f"No customers match this segment. Rules: {segment.rule_json}"
         )
 
-    # Mark as launched
+    # Update campaign status
     campaign.status = "launched"
-    campaign.launched_at = datetime.utcnow()
-
-    # Resolve segment audience
-    customers = await get_segment_customers(db, campaign.segment.rule_json)
+    campaign.launched_at = datetime.now(timezone.utc)
     campaign.audience_size = len(customers)
 
-    # Create campaign_recipient rows
-    messages = []
-    campaign_recipients = []
+    # Create recipient records
+    recipients = []
     for customer in customers:
-        personalized_msg = campaign.message_template.replace(
+        message = campaign.message_template.replace(
             "{first_name}", customer.first_name
         )
-
-        cr_id = uuid.uuid4()
-        cr = CampaignRecipient(
-            id=cr_id,
+        recipient = CampaignRecipient(
             campaign_id=campaign.id,
             customer_id=customer.id,
             personalization_json={"first_name": customer.first_name},
             current_status="pending",
         )
-        campaign_recipients.append(cr)
+        db.add(recipient)
+        recipients.append((customer, recipient, message))
 
-        # Determine destination based on channel
-        if campaign.channel == "email":
-            destination = customer.email
-        else:
-            destination = customer.phone
-
-        messages.append({
-            "recipient_id": str(customer.id),
-            "destination": destination,
-            "message": personalized_msg,
-            "metadata": {"campaign_recipient_id": str(cr_id)},
-        })
-
-    if campaign_recipients:
-        db.add_all(campaign_recipients)
-
-    # Explicitly commit database transaction before making the external HTTP network request
-    # to avoid holding database connections open during long-running network operations.
     await db.commit()
 
-    # POST to channel service — wrapped in try/except so campaign still launches even if service is down
+    # Refresh recipients to get their IDs
+    for _, recipient, _ in recipients:
+        await db.refresh(recipient)
+
+    print(f"[SEND] Created {len(recipients)} recipient records")
+
+    # Build payload for channel service
+    messages = []
+    for customer, recipient, message in recipients:
+        destination = customer.phone if campaign.channel in ["whatsapp", "sms"] else customer.email
+        messages.append({
+            "recipient_id": str(customer.id),
+            "destination": destination or customer.email,
+            "message": message,
+            "metadata": {
+                "campaign_recipient_id": str(recipient.id)
+            }
+        })
+
+    payload = {
+        "campaign_id": str(campaign.id),
+        "channel": campaign.channel,
+        "messages": messages
+    }
+
+    print(f"[SEND] Sending {len(messages)} messages to channel service")
+    print(f"[SEND] Channel service URL: {settings.CHANNEL_SERVICE_URL}")
+
+    # Call channel service
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            await client.post(
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
                 f"{settings.CHANNEL_SERVICE_URL}/send",
-                json={
-                    "campaign_id": str(campaign.id),
-                    "channel": campaign.channel,
-                    "messages": messages,
-                },
+                json=payload
             )
+            print(f"[SEND] Channel service response: {response.status_code}")
+            print(f"[SEND] Channel service body: {response.text}")
+            response.raise_for_status()
+    except httpx.TimeoutException:
+        print(f"[SEND ERROR] Channel service timed out")
+        # Don't fail — campaign is launched, callbacks may still come
     except Exception as e:
-        logger.error(f"Channel service call failed for campaign {campaign.id}: {e}")
-        # Don't crash — campaign is still marked as launched
+        print(f"[SEND ERROR] {type(e).__name__}: {e}")
+        # Don't fail — log and continue
 
     return {
         "campaign_id": str(campaign.id),
-        "recipients_count": len(customers),
         "status": "launched",
+        "recipients_count": len(customers)
     }
 
 

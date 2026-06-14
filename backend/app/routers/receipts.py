@@ -5,12 +5,13 @@ Handles idempotency via dedupe_key, and status-precedence checks to
 avoid downgrading a recipient's status.
 """
 import uuid
-from datetime import datetime
+from uuid import UUID
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -19,22 +20,9 @@ from app.models.communication_event import CommunicationEvent
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
 
-# Status precedence — higher index = higher precedence
-STATUS_ORDER = ["pending", "sent", "delivered", "opened", "read", "clicked"]
-STATUS_RANK = {s: i for i, s in enumerate(STATUS_ORDER)}
 
-# Which timestamp field to set for each event type
-EVENT_TIMESTAMP_FIELD = {
-    "sent": "sent_at",
-    "delivered": "delivered_at",
-    "opened": "opened_at",
-    "read": "read_at",
-    "clicked": "clicked_at",
-}
-
-
-class ReceiptBody(BaseModel):
-    campaign_recipient_id: uuid.UUID
+class ReceiptPayload(BaseModel):
+    campaign_recipient_id: str
     provider_message_id: str = Field(..., max_length=255)
     event_type: str = Field(..., max_length=50)
     event_timestamp: datetime
@@ -43,58 +31,90 @@ class ReceiptBody(BaseModel):
 
 
 @router.post("")
-async def receive_receipt(body: ReceiptBody, db: AsyncSession = Depends(get_db)):
-    """
-    Ingest a delivery status event from the channel service.
+async def receive_receipt(
+    payload: ReceiptPayload,
+    db: AsyncSession = Depends(get_db)
+):
+    print(f"[RECEIPT] Received: {payload.event_type} for recipient {payload.campaign_recipient_id}")
 
-    Idempotency: if dedupe_key exists, return 200 with status=duplicate.
-    Status precedence: never downgrade (e.g. don't overwrite 'clicked' with 'delivered').
-    """
-    from datetime import timezone
-    # Convert timezone-aware datetime to naive UTC datetime
-    if body.event_timestamp.tzinfo is not None:
-        body.event_timestamp = body.event_timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+    # Idempotency check
+    try:
+        existing = await db.execute(
+            select(CommunicationEvent).where(
+                CommunicationEvent.dedupe_key == payload.dedupe_key
+            )
+        )
+        if existing.scalar_one_or_none():
+            print(f"[RECEIPT] Duplicate event ignored: {payload.dedupe_key}")
+            return {"status": "duplicate"}
+    except Exception as e:
+        print(f"[RECEIPT] Dedupe check error: {e}")
 
-    # 1. Idempotency check
-    existing = await db.execute(
-        select(CommunicationEvent).where(CommunicationEvent.dedupe_key == body.dedupe_key)
-    )
-    if existing.scalars().first():
-        return {"status": "duplicate"}
+    # Find recipient - try UUID first then string
+    recipient = None
+    try:
+        recipient = await db.get(CampaignRecipient, UUID(payload.campaign_recipient_id))
+    except Exception:
+        try:
+            result = await db.execute(
+                select(CampaignRecipient).where(
+                    cast(CampaignRecipient.id, String) == payload.campaign_recipient_id
+                )
+            )
+            recipient = result.scalar_one_or_none()
+        except Exception as e:
+            print(f"[RECEIPT] Error finding recipient: {e}")
 
-    # 2. Verify campaign recipient exists
-    cr_result = await db.execute(
-        select(CampaignRecipient).where(CampaignRecipient.id == body.campaign_recipient_id)
-    )
-    cr = cr_result.scalars().first()
-    if not cr:
-        return {"status": "error", "detail": "Campaign recipient not found"}
+    if not recipient:
+        print(f"[RECEIPT] Recipient not found: {payload.campaign_recipient_id}")
+        return {"status": "recipient_not_found"}
 
-    # 3. Insert communication event
+    # Status precedence — never downgrade
+    STATUS_ORDER = {
+        "pending": 0, "sent": 1, "delivered": 2,
+        "opened": 3, "read": 4, "clicked": 5, "failed": -1
+    }
+
+    current_order = STATUS_ORDER.get(recipient.current_status, 0)
+    new_order = STATUS_ORDER.get(payload.event_type, 0)
+
+    # Save event
     event = CommunicationEvent(
-        campaign_recipient_id=body.campaign_recipient_id,
-        event_type=body.event_type,
-        event_timestamp=body.event_timestamp,
-        provider_message_id=body.provider_message_id,
-        metadata_json=body.metadata,
-        dedupe_key=body.dedupe_key,
+        campaign_recipient_id=recipient.id,
+        event_type=payload.event_type,
+        event_timestamp=payload.event_timestamp,
+        provider_message_id=payload.provider_message_id,
+        metadata_json=payload.metadata,
+        dedupe_key=payload.dedupe_key,
     )
     db.add(event)
 
-    # 4. Update campaign_recipient status (with precedence check)
-    new_rank = STATUS_RANK.get(body.event_type, -1)
-    current_rank = STATUS_RANK.get(cr.current_status, -1)
+    # Update recipient status and timestamps
+    now = datetime.now(timezone.utc)
+    if payload.event_type == "sent" and not recipient.sent_at:
+        recipient.sent_at = now
+    elif payload.event_type == "delivered" and not recipient.delivered_at:
+        recipient.delivered_at = now
+    elif payload.event_type == "failed":
+        recipient.current_status = "failed"
+    elif payload.event_type == "opened" and not recipient.opened_at:
+        recipient.opened_at = now
+    elif payload.event_type == "read" and not recipient.read_at:
+        recipient.read_at = now
+    elif payload.event_type == "clicked" and not recipient.clicked_at:
+        recipient.clicked_at = now
 
-    if body.event_type == "failed":
-        # Failed is a terminal state — always set it
-        cr.current_status = "failed"
-    elif new_rank > current_rank:
-        # Only upgrade status, never downgrade
-        cr.current_status = body.event_type
+    # Only upgrade status, never downgrade
+    if new_order > current_order:
+        recipient.current_status = payload.event_type
+        print(f"[RECEIPT] Status updated: {payload.campaign_recipient_id} → {payload.event_type}")
 
-        # Set the corresponding timestamp field
-        ts_field = EVENT_TIMESTAMP_FIELD.get(body.event_type)
-        if ts_field and getattr(cr, ts_field) is None:
-            setattr(cr, ts_field, body.event_timestamp)
+    try:
+        await db.commit()
+        print(f"[RECEIPT] Saved successfully")
+    except Exception as e:
+        await db.rollback()
+        print(f"[RECEIPT] Commit error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
     return {"status": "ok"}
