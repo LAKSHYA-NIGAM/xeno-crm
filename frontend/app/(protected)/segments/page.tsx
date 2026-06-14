@@ -188,6 +188,21 @@ export default function SegmentsPage() {
     }
   };
 
+  // Delete a segment
+  const handleDeleteSegment = async (segmentId: string) => {
+    const confirmed = window.confirm("Delete this segment?");
+    if (!confirmed) return;
+    try {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/segments/${segmentId}`, {
+        method: "DELETE",
+      });
+      setSegments((prev) => prev.filter((s) => s.id !== segmentId));
+      toast.success("Segment deleted");
+    } catch (e) {
+      toast.error("Failed to delete segment");
+    }
+  };
+
   // Create & save segment
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -667,13 +682,32 @@ export default function SegmentsPage() {
                         Created {seg.created_at ? new Date(seg.created_at).toLocaleDateString() : "Draft"}
                       </span>
 
-                      <Link
-                        href={`/campaigns?new=true&segment_id=${seg.id}`}
-                        className="flex items-center gap-0.5 text-accent-purple hover:text-accent-purple/85 font-semibold transition-all"
-                      >
-                        <span>Use in Campaign</span>
-                        <ChevronRight className="h-3 w-3 stroke-[2.5]" />
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteSegment(seg.id);
+                          }}
+                          style={{
+                            fontSize: 11,
+                            color: "#EF4444",
+                            background: "none",
+                            border: "1px solid #2A2A2A",
+                            borderRadius: "4px",
+                            padding: "3px 8px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Delete
+                        </button>
+                        <Link
+                          href={`/campaigns?new=true&segment_id=${seg.id}`}
+                          className="flex items-center gap-0.5 text-accent-purple hover:text-accent-purple/85 font-semibold transition-all"
+                        >
+                          <span>Use in Campaign</span>
+                          <ChevronRight className="h-3 w-3 stroke-[2.5]" />
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 );

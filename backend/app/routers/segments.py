@@ -104,3 +104,17 @@ async def get_segment(segment_id: uuid.UUID, db: AsyncSession = Depends(get_db))
         "estimated_count": segment.estimated_count,
         "created_at": segment.created_at.isoformat() if segment.created_at else None,
     }
+
+
+@router.delete("/{segment_id}")
+async def delete_segment(segment_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Delete a segment by ID."""
+    result = await db.execute(select(Segment).where(Segment.id == segment_id))
+    segment = result.scalars().first()
+
+    if not segment:
+        raise HTTPException(status_code=404, detail=f"Segment {segment_id} not found")
+
+    await db.delete(segment)
+    await db.commit()
+    return {"deleted": True}
