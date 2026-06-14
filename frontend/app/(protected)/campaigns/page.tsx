@@ -95,6 +95,24 @@ function CampaignsContent() {
     loadData();
   }, []);
 
+  // Silent polling for active/launched campaigns to auto-update progress
+  useEffect(() => {
+    const hasActiveCampaign = campaigns.some(c => c.status === "launched");
+    if (!hasActiveCampaign) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const camps = await api.getCampaigns();
+        setCampaigns(camps);
+      } catch (err) {
+        console.error("Silent campaign refresh failed:", err);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [campaigns]);
+
+
   // Fetch segments when composer mounts
   useEffect(() => {
     const loadSegments = async () => {

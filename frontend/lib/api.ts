@@ -129,7 +129,7 @@ export interface AIMessageDraft {
 export const api = {
   getOverview: async () => {
     try {
-      const res = await fetch(`${BASE}/analytics/overview`)
+      const res = await fetch(`${BASE}/analytics/overview`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return await res.json() as OverviewStats
     } catch (e) {
@@ -148,7 +148,7 @@ export const api = {
 
   getSegments: async () => {
     try {
-      const res = await fetch(`${BASE}/segments`)
+      const res = await fetch(`${BASE}/segments`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return await res.json() as Segment[]
     } catch (e) {
@@ -189,7 +189,7 @@ export const api = {
 
   getCampaigns: async () => {
     try {
-      const res = await fetch(`${BASE}/campaigns`)
+      const res = await fetch(`${BASE}/campaigns`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return await res.json() as Campaign[]
     } catch (e) {
@@ -200,7 +200,7 @@ export const api = {
 
   getCampaignById: async (id: string) => {
     try {
-      const res = await fetch(`${BASE}/campaigns/${id}`)
+      const res = await fetch(`${BASE}/campaigns/${id}`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return await res.json() as CampaignDetail
     } catch (e) {
@@ -237,7 +237,7 @@ export const api = {
 
   getCampaignFunnel: async (id: string) => {
     try {
-      const res = await fetch(`${BASE}/analytics/campaigns/${id}/funnel`)
+      const res = await fetch(`${BASE}/analytics/campaigns/${id}/funnel`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return await res.json() as { funnel: FunnelStage[] }
     } catch (e) {
@@ -248,7 +248,7 @@ export const api = {
 
   getCampaignTimeline: async (id: string) => {
     try {
-      const res = await fetch(`${BASE}/analytics/campaigns/${id}/timeline`)
+      const res = await fetch(`${BASE}/analytics/campaigns/${id}/timeline`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return await res.json() as { timeline: TimelineEvent[] }
     } catch (e) {
