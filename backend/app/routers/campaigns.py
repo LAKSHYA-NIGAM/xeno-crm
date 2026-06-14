@@ -243,7 +243,9 @@ async def send_campaign(
         message = campaign.message_template.replace(
             "{first_name}", customer.first_name
         )
+        cr_id = uuid.uuid4()
         recipient = CampaignRecipient(
+            id=cr_id,
             campaign_id=campaign.id,
             customer_id=customer.id,
             personalization_json={"first_name": customer.first_name},
@@ -253,10 +255,6 @@ async def send_campaign(
         recipients.append((customer, recipient, message))
 
     await db.commit()
-
-    # Refresh recipients to get their IDs
-    for _, recipient, _ in recipients:
-        await db.refresh(recipient)
 
     print(f"[SEND] Created {len(recipients)} recipient records")
 
