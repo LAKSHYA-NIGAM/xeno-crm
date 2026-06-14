@@ -43,6 +43,22 @@ export default function DashboardPage() {
     loadData()
   }, [])
 
+  useEffect(() => {
+    // Silently wake both Render services on dashboard load
+    // This ensures callbacks work immediately when evaluator launches a campaign
+    const warmUp = async () => {
+      try {
+        await Promise.all([
+          fetch("https://xeno-crm-ry0s.onrender.com/api/health"),
+          fetch("https://xeno-channel-service-ra2k.onrender.com/health"),
+        ])
+      } catch (e) {
+        // Silent fail — user never sees this
+      }
+    }
+    warmUp()
+  }, [])
+
   // Greeting Logic
   const getGreeting = () => {
     const hour = new Date().getHours()
