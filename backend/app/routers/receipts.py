@@ -37,6 +37,11 @@ async def receive_receipt(
 ):
     print(f"[RECEIPT] Received: {payload.event_type} for recipient {payload.campaign_recipient_id}")
 
+    # Convert event_timestamp to naive UTC datetime
+    event_timestamp = payload.event_timestamp
+    if event_timestamp.tzinfo is not None:
+        event_timestamp = event_timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+
     # Idempotency check
     try:
         existing = await db.execute(
@@ -82,7 +87,7 @@ async def receive_receipt(
     event = CommunicationEvent(
         campaign_recipient_id=recipient.id,
         event_type=payload.event_type,
-        event_timestamp=payload.event_timestamp,
+        event_timestamp=event_timestamp,
         provider_message_id=payload.provider_message_id,
         metadata_json=payload.metadata,
         dedupe_key=payload.dedupe_key,
@@ -90,7 +95,7 @@ async def receive_receipt(
     db.add(event)
 
     # Update recipient status and timestamps
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     if payload.event_type == "sent" and not recipient.sent_at:
         recipient.sent_at = now
     elif payload.event_type == "delivered" and not recipient.delivered_at:

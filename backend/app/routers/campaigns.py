@@ -234,7 +234,7 @@ async def send_campaign(
 
     # Update campaign status
     campaign.status = "launched"
-    campaign.launched_at = datetime.now(timezone.utc)
+    campaign.launched_at = datetime.utcnow()
     campaign.audience_size = len(customers)
 
     # Create recipient records
