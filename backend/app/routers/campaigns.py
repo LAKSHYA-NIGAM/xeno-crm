@@ -285,16 +285,37 @@ async def send_campaign(
     # Call channel service
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
+            # First ping health to wake it up
+            print(f"[SEND] Waking channel service...")
+            health = await client.get(f"{settings.CHANNEL_SERVICE_URL}/health")
+            print(f"[SEND] Channel service awake: {health.status_code}")
+            
+            # Wait 2 seconds for it to fully initialize
+            import asyncio
+            await asyncio.sleep(2)
+            
+            # Now send the actual batch
+            print(f"[SEND] Sending batch of {len(messages)} messages...")
             response = await client.post(
                 f"{settings.CHANNEL_SERVICE_URL}/send",
-                json=payload
+                json=payload,
+                timeout=60.0
             )
             print(f"[SEND] Channel service response: {response.status_code}")
-            print(f"[SEND] Channel service body: {response.text}")
             response.raise_for_status()
-    except httpx.TimeoutException:
-        print(f"[SEND ERROR] Channel service timed out")
-        # Don't fail — campaign is launched, callbacks may still come
+
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 502:
+            # Channel service was sleeping — retry once after 10 seconds
+            print(f"[SEND] Got 502 — retrying after 10 seconds...")
+            await asyncio.sleep(10)
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{settings.CHANNEL_SERVICE_URL}/send",
+                    json=payload,
+                    timeout=60.0
+                )
+                print(f"[SEND] Retry response: {response.status_code}")
     except Exception as e:
         print(f"[SEND ERROR] {type(e).__name__}: {e}")
         # Don't fail — log and continue
